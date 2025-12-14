@@ -1,0 +1,25 @@
+{
+    "compilerOptions": {
+      "target": "ESNext",
+      "module": "CommonJS",
+      "moduleResolution": "node",
+      "outDir": "out",
+      "sourceMap": true,
+      "types": ["node", "@playwright/test"],
+      "baseUrl": ".",
+      "paths": {
+        "@page/*": ["src/page/*"],
+        "@fixtures/*": ["src/fixtures/*"],
+        "@utilities/*": ["src/utilities/*"],
+        "@data/*": ["src/data/*"],
+        "@interfaces/*": ["src/interfaces/*"],
+      },
+      "strict": false,
+      "noImplicitAny": true,
+      "strictNullChecks": true,
+      "noUnusedLocals": true,
+      "esModuleInterop": true,
+      "skipLibCheck": true
+    }
+  }
+  

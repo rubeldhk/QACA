@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>bloomex.com.au QA Automation Index</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 20px;
+            background: #f5f7fb;
+        }
+
+        h1 {
+            margin-bottom: 0.25rem;
+        }
+
+        h2 {
+            margin-top: 2rem;
+        }
+
+        .env-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-left: 8px;
+            color: #fff;
+        }
+
+        .env-stage {
+            background: #007bff;
+        }
+
+        .env-prod {
+            background: #28a745;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        thead {
+            background: #e9edf5;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #dde2ee;
+            text-align: left;
+            font-size: 14px;
+        }
+
+        th {
+            font-weight: 600;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 6px 12px;
+            font-size: 13px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .btn-stage {
+            background: #007bff;
+            color: #fff;
+        }
+
+        .btn-prod {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .small-note {
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+        }
+    </style>
+
+    <script>
+        // Map: environment -> groupId -> trigger URL
+        // TODO: Replace each placeholder URL with your real automation trigger endpoint
+        const qaConfig = {
+            stage: {
+                "QAATG01": "https://stage.example.com/qa/run/QAATG01",
+                "QAATG02": "https://stage.example.com/qa/run/QAATG02",
+                "QAATG03": "https://stage.example.com/qa/run/QAATG03",
+                "QAATG04": "https://stage.example.com/qa/run/QAATG04",
+                "QAATG05": "https://stage.example.com/qa/run/QAATG05",
+                "QAATG06": "https://stage.example.com/qa/run/QAATG06",
+                "QAATG07": "https://stage.example.com/qa/run/QAATG07",
+                "QAATG08": "https://stage.example.com/qa/run/QAATG08",
+                "QAATG09": "https://stage.example.com/qa/run/QAATG09",
+                "QAATG10": "https://stage.example.com/qa/run/QAATG10" // Special Collection
+            },
+            prod: {
+                "QAATG01": "https://prod.example.com/qa/run/QAATG01",
+                "QAATG02": "https://prod.example.com/qa/run/QAATG02",
+                "QAATG03": "https://prod.example.com/qa/run/QAATG03",
+                "QAATG04": "https://prod.example.com/qa/run/QAATG04",
+                "QAATG05": "https://prod.example.com/qa/run/QAATG05",
+                "QAATG06": "https://prod.example.com/qa/run/QAATG06",
+                "QAATG07": "https://prod.example.com/qa/run/QAATG07",
+                "QAATG08": "https://prod.example.com/qa/run/QAATG08",
+                "QAATG09": "https://prod.example.com/qa/run/QAATG09",
+                "QAATG10": "https://prod.example.com/qa/run/QAATG10" // Special Collection
+            }
+        };
+
+        // Simple helper to trigger automation
+        function runQA(env, groupId) {
+            const url = qaConfig[env][groupId];
+
+            if (!url) {
+                alert("Trigger URL not configured for " + groupId + " (" + env + ").");
+                return;
+            }
+
+            const ok = confirm("Run QA for " + groupId + " on " + env.toUpperCase() + "?");
+            if (!ok) return;
+
+            // You can change this to GET if your endpoint expects GET
+            fetch(url, { method: "POST" })
+                .then(res => {
+                    if (!res.ok) throw new Error("HTTP " + res.status);
+                    return res.text();
+                })
+                .then(() => {
+                    alert("QA run triggered for " + groupId + " on " + env.toUpperCase() + ".");
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert("Failed to trigger QA: " + err.message);
+                });
+        }
+    </script>
+</head>
+
+<body>
+    <h1>bloomex.ca QA Automation Index</h1>
+    <div class="small-note">
+        Use this page to access reports and trigger test runs for each QA Automation Test Case Group.
+    </div>
+
+    <h2>
+        Test Case Groups
+        <span class="env-badge env-stage">Stage</span>
+        <span class="env-badge env-prod">Production</span>
+    </h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Group ID</th>
+                <th>Description</th>
+                <th>Stage Report</th>
+                <th>Prod Report</th>
+                <th>Run QA (Stage)</th>
+                <th>Run QA (Prod)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>QAATG01</td>
+                <td>Home page</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG01.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG01.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG01')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG01')">Run QA</button></td>
+            </tr>
+            <tr>
+                <td>QAATG02</td>
+                <td>Account / Account</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG02.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG02.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG02')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG02')">Run QA</button></td>
+            </tr>
+            <tr>
+                <td>QAATG03</td>
+                <td>Checkout</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG03.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG03.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG03')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG03')">Run QA</button></td>
+            </tr>
+            <tr>
+                <td>QAATG04</td>
+                <td>Best Sellers</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG04.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG04.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG04')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG04')">Run QA</button></td>
+            </tr>
+            <tr>
+                <td>QAATG05</td>
+                <td>Login / Account</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG05.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG05.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG05')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG05')">Run QA</button></td>
+            </tr>
+            <tr>
+                <td>QAATG06</td>
+                <td>Corporate</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG06.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG06.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG06')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG06')">Run QA</button></td>
+            </tr>
+            <tr>
+                <td>QAATG07</td>
+                <td>Flowers and Plants</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG07.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG07.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG07')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG07')">Run QA</button></td>
+            </tr>
+            <tr>
+                <td>QAATG08</td>
+                <td>Gift Basket</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG08.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG08.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG08')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG08')">Run QA</button></td>
+            </tr>
+            <tr>
+                <td>QAATG09</td>
+                <td>Occasion</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG09.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG09.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG09')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG09')">Run QA</button></td>
+            </tr>
+            <tr>
+                <td>QAATG10</td>
+                <td>Special Collection</td>
+                <td><a href="https://stage.example.com/qa/reports/QAATG10.html" target="_blank">View</a></td>
+                <td><a href="https://prod.example.com/qa/reports/QAATG10.html" target="_blank">View</a></td>
+                <td><button class="btn btn-stage" onclick="runQA('stage','QAATG10')">Run QA</button></td>
+                <td><button class="btn btn-prod" onclick="runQA('prod','QAATG10')">Run QA</button></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p class="small-note">
+        <!-- Adjust IDs/descriptions if needed; QAATG10 used for "Special Collection" since QAATG09 was repeated. -->
+        Replace all <code>example.com</code> URLs with your real Stage/Prod report locations and automation endpoints.
+    </p>
+</body>
+</html>

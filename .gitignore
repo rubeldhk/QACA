@@ -1,0 +1,17 @@
+/node_modules
+/allure-results
+/allure-report
+/dist
+/build
+/coverage
+/logs
+/temp
+/cache
+/screenshots
+/videos
+/reports
+/test-results
+/test-reports
+/src/config/
+playwright-report/index.html
+/playwright-report
