@@ -91,11 +91,11 @@
     @media(max-width: 768px) { iframe { height: 50vh; } .columns { grid-template-columns: 1fr; } }
   </style>
 </head>
-<body data-trigger-url="">
+<body data-trigger-url="" data-viewer-base-url="">
   <header>
     <div>
       <h1>Bloomex QA Automation On-Demand</h1>
-      <div class="sub">Trigger Playwright + Allure runs, view the last two executions, and compare side-by-side.</div>
+      <div class="sub">Trigger Playwright + Allure runs, view the last two executions, and compare side-by-side. Function URL access is protected with a shared token.</div>
     </div>
     <div class="panel" style="min-width:320px;">
       <div class="filters">
@@ -112,6 +112,10 @@
             <option value="en">English</option>
             <option value="fr">French</option>
           </select>
+        </div>
+        <div>
+          <label for="token">Shared token</label>
+          <input id="token" type="password" placeholder="Required to trigger runs" autocomplete="off" />
         </div>
         <div>
           <label for="reportType">Report</label>
@@ -149,6 +153,8 @@
 
   <script>
     const triggerUrl = document.body.dataset.triggerUrl || 'REPLACE_WITH_FUNCTION_URL';
+    const viewerBaseUrl = (document.body.dataset.viewerBaseUrl || '').replace(/\/$/, '');
+    const tokenInput = document.getElementById('token');
     const groupConfig = [
       { id: 'QAATG01', name: 'Homepage Smoke', description: 'Anonymous browsing + top funnel' },
       { id: 'QAATG02', name: 'Account', description: 'Registration, login, profile' },
@@ -183,6 +189,11 @@
       return (((meta || {})[env] || {})[locale] || {})[groupId] || {};
     }
 
+    function withBase(path) {
+      if (!viewerBaseUrl) return path;
+      return `${viewerBaseUrl}${path}`;
+    }
+
     function renderGroups() {
       const env = document.getElementById('environment').value;
       const locale = document.getElementById('locale').value;
@@ -191,8 +202,8 @@
         const summary = summaryFor(env, locale, g.id);
         const last = summary.latest || '—';
         const prev = summary.prev || '—';
-        const latestUrl = `/reports/${env}/${locale}/${g.id}/latest/index.html`;
-        const prevUrl = `/reports/${env}/${locale}/${g.id}/prev/index.html`;
+        const latestUrl = withBase(`/reports/${env}/${locale}/${g.id}/latest/index.html`);
+        const prevUrl = withBase(`/reports/${env}/${locale}/${g.id}/prev/index.html`);
         const statusBadge = summary.status || 'Pending';
         const statusClass = statusBadge === 'PASS' ? 'pass' : statusBadge === 'FAIL' ? 'fail' : 'running';
         const duration = summary.durationSeconds ? `${summary.durationSeconds}s` : '—';
@@ -234,6 +245,13 @@
       const workers = Number(document.getElementById('workers').value || 2);
       const retries = Number(document.getElementById('retries').value || 0);
       const tagFilter = document.getElementById('tagFilter').value.trim();
+      const token = tokenInput.value.trim();
+
+      if (!token) {
+        runStatus.classList.add('show');
+        runStatus.innerHTML = `<div style="color:var(--fail);">Shared token is required to trigger a run.</div>`;
+        return;
+      }
 
       const payload = {
         env,
@@ -256,15 +274,25 @@
       try {
         const res = await fetch(triggerUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-qaca-token': token },
           body: JSON.stringify(payload)
         });
+        if (res.status === 401) {
+          runStatus.innerHTML = `<div style="color:var(--fail);">Unauthorized: shared token rejected.</div>`;
+          return;
+        }
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
         const data = await res.json();
-        runStatus.innerHTML = `<div><strong>Execution:</strong> ${data.executionId}</div><div class="muted">Polling status...</div>`;
-        pollStatus(data.statusUrl);
+        if (data.statusUrl && data.executionId) {
+          runStatus.innerHTML = `<div><strong>Execution:</strong> ${data.executionId}</div><div class="muted">Polling status...</div>`;
+          pollStatus(data.statusUrl);
+        } else {
+          const baseMsg = data.message || 'Triggered';
+          const instance = data.instanceId ? ` (Instance: ${data.instanceId})` : '';
+          runStatus.innerHTML = `<div><strong>${baseMsg}${instance}</strong></div>`;
+        }
       } catch (e) {
         runStatus.innerHTML = `<div style="color:var(--fail);">Failed to trigger: ${e.message}</div>`;
       }
@@ -282,7 +310,7 @@
           runStatus.innerHTML = `<div><strong>Execution:</strong> ${data.executionId}</div><div>Status: ${status}</div>`;
           if (status === 'PASS' || status === 'FAIL') {
             clearInterval(interval);
-            runStatus.innerHTML += `<div><a class="link-btn" href="/reports/${data.env}/${data.locale}/${data.groupId}/latest/index.html" target="_blank">Open report</a></div>`;
+            runStatus.innerHTML += `<div><a class="link-btn" href="${withBase(`/reports/${data.env}/${data.locale}/${data.groupId}/latest/index.html`)}" target="_blank">Open report</a></div>`;
             loadMeta();
           }
           if (attempts > 60) clearInterval(interval);
@@ -295,8 +323,8 @@
     function showCompare(groupId) {
       const env = document.getElementById('environment').value;
       const locale = document.getElementById('locale').value;
-      const latestUrl = `/reports/${env}/${locale}/${groupId}/latest/index.html`;
-      const prevUrl = `/reports/${env}/${locale}/${groupId}/prev/index.html`;
+      const latestUrl = withBase(`/reports/${env}/${locale}/${groupId}/latest/index.html`);
+      const prevUrl = withBase(`/reports/${env}/${locale}/${groupId}/prev/index.html`);
       compareArea.innerHTML = `
         <div class="columns">
           <div>

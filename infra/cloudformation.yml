@@ -363,12 +363,38 @@ Resources:
           ARTIFACT_KEY: !Ref ArtifactZipKey
           REPORTS_BUCKET: !Ref ReportsBucketName
           DEFAULT_INSTANCE_TYPE: !Ref RunnerDefaultInstanceType
+          QACA_TOKEN: "REPLACE_WITH_SECURE_TOKEN"
       Code:
         ZipFile: |
           import json, os, boto3
           ec2 = boto3.client("ec2")
 
+          def _cors_headers():
+              return {
+                  "access-control-allow-origin": "*",
+                  "access-control-allow-headers": "content-type, x-qaca-token",
+                  "access-control-allow-methods": "POST, OPTIONS",
+              }
+
           def handler(event, context):
+              method = (((event or {}).get("requestContext") or {}).get("http") or {}).get("method", "").upper()
+              if method == "OPTIONS":
+                  return {
+                      "statusCode": 200,
+                      "headers": _cors_headers(),
+                      "body": "",
+                  }
+
+              headers = {k.lower(): v for k, v in ((event or {}).get("headers") or {}).items()}
+              provided = headers.get("x-qaca-token", "")
+              expected = os.environ.get("QACA_TOKEN", "")
+              if not provided or provided != expected:
+                  return {
+                      "statusCode": 401,
+                      "headers": _cors_headers() | {"content-type": "application/json"},
+                      "body": json.dumps({"message": "Unauthorized"}),
+                  }
+
               body = {}
               if isinstance(event, dict) and event.get("body"):
                   try:
@@ -414,33 +440,32 @@ Resources:
               iid = resp["Instances"][0]["InstanceId"]
               return {
                   "statusCode": 200,
-                  "headers": {"content-type":"application/json"},
+                  "headers": _cors_headers() | {"content-type":"application/json"},
                   "body": json.dumps({"message":"runner launched","instanceId": iid, "instanceType": itype})
               }
 
   TriggerFunctionUrl:
-  Type: AWS::Lambda::Url
-  Properties:
-    AuthType: NONE
-    TargetFunctionArn: !Ref TriggerLambda
-    Cors:
-      AllowOrigins:
-        - "*"
-      AllowMethods:
-        - "POST"
-        - "OPTIONS"
-      AllowHeaders:
-        - "content-type"
-        - "x-qaca-token"
-
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !Ref TriggerLambda
+      Cors:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - "POST"
+          - "OPTIONS"
+        AllowHeaders:
+          - "content-type"
+          - "x-qaca-token"
 
   TriggerUrlPermission:
-  Type: AWS::Lambda::Permission
-  Properties:
-    FunctionName: !Ref TriggerLambda
-    Action: lambda:InvokeFunctionUrl
-    Principal: "*"
-    FunctionUrlAuthType: NONE
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TriggerLambda
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
 
 Outputs:
   AlbDnsName:
