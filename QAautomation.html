@@ -270,7 +270,7 @@
       const payload = {
         env,
         locale,
-        groupId,
+        group: groupId,
         runId: generateRunId(),
         reportType,
         workers,
@@ -333,7 +333,7 @@
           runStatus.innerHTML = `<div><strong>Execution:</strong> ${data.executionId}</div><div>Status: ${status}</div>`;
           if (status === 'PASS' || status === 'FAIL') {
             clearInterval(interval);
-            runStatus.innerHTML += `<div><a class="link-btn" href="${withBase(`/reports/${data.env}/${data.locale}/${data.groupId}/latest/index.html`)}" target="_blank">Open report</a></div>`;
+            runStatus.innerHTML += `<div><a class="link-btn" href="${withBase(`/reports/${data.env}/${data.locale}/${data.group}/latest/index.html`)}" target="_blank">Open report</a></div>`;
             loadMeta();
           }
           if (attempts > 60) clearInterval(interval);

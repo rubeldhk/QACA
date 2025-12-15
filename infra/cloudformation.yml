@@ -45,6 +45,10 @@ Parameters:
     Type: String
     Default: c7i.2xlarge
     Description: Default compute for on-demand runner.
+  QacaToken:
+    Type: String
+    NoEcho: true
+    Description: Shared token required by the trigger Lambda.
 
 Conditions:
   HasKeyPair: !Not [!Equals [!Ref KeyPairName, ""]]
@@ -65,7 +69,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectName}-${EnvironmentName}-alb-sg"
+          Value: !Sub "${ProjectName}-${EnvironmentName}-as"
         - Key: Project
           Value: !Ref ProjectName
         - Key: Environment
@@ -103,7 +107,7 @@ Resources:
         - !Ref AlbSecurityGroup
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectName}-${EnvironmentName}-alb"
+          Value: !Sub "${ProjectName}-${EnvironmentName}-lb"
         - Key: Project
           Value: !Ref ProjectName
         - Key: Environment
@@ -122,7 +126,7 @@ Resources:
         HttpCode: "200-399"
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectName}-${EnvironmentName}-viewer-tg"
+          Value: !Sub "${ProjectName}-${EnvironmentName}-tg"
         - Key: Project
           Value: !Ref ProjectName
         - Key: Environment
@@ -355,15 +359,17 @@ Resources:
       Timeout: 30
       Environment:
         Variables:
-          RUNNER_AMI: !Ref RunnerAmiId
-          RUNNER_PROFILE_ARN: !GetAtt RunnerInstanceProfile.Arn
-          RUNNER_SG: !Ref RunnerSecurityGroup
-          RUNNER_SUBNET: !Select [0, !Ref PublicSubnets]
+          STAGING_BUCKET: !Ref ReportsBucketName
           ARTIFACT_BUCKET: !Ref ArtifactBucketName
           ARTIFACT_KEY: !Ref ArtifactZipKey
           REPORTS_BUCKET: !Ref ReportsBucketName
+          RUNNER_AMI: !Ref RunnerAmiId
+          RUNNER_INSTANCE_PROFILE: !GetAtt RunnerInstanceProfile.Arn
+          RUNNER_SECURITY_GROUP: !Ref RunnerSecurityGroup
+          RUNNER_SUBNET: !Select [0, !Ref PublicSubnets]
           DEFAULT_INSTANCE_TYPE: !Ref RunnerDefaultInstanceType
-          QACA_TOKEN: "REPLACE_WITH_SECURE_TOKEN"
+          VIEWER_BASE_URL: !Sub "http://${Alb.DNSName}"
+          QACA_TOKEN: !Ref QacaToken
       Code:
         ZipFile: |
           import json, os, boto3
@@ -424,11 +430,11 @@ Resources:
                   InstanceType=itype,
                   MinCount=1,
                   MaxCount=1,
-                  IamInstanceProfile={"Arn": os.environ["RUNNER_PROFILE_ARN"]},
+                  IamInstanceProfile={"Arn": os.environ["RUNNER_INSTANCE_PROFILE"]},
                   NetworkInterfaces=[{
                       "DeviceIndex": 0,
                       "SubnetId": os.environ["RUNNER_SUBNET"],
-                      "Groups": [os.environ["RUNNER_SG"]],
+                      "Groups": [os.environ["RUNNER_SECURITY_GROUP"]],
                       "AssociatePublicIpAddress": True
                   }],
                   UserData=user_data,

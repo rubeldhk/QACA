@@ -24,7 +24,7 @@ function validateEnv() {
 function buildUserData(params) {
   const {
     env,
-    groupId,
+    group,
     locale,
     executionId,
     reportType,
@@ -43,7 +43,7 @@ function buildUserData(params) {
   const stagingBucket = process.env.STAGING_BUCKET;
   const artifactBucket = process.env.ARTIFACT_BUCKET;
 
-  const userDataScript = `#!/bin/bash\nset -euo pipefail\n\n\nexport EXECUTION_ID=${executionId}\nexport NODE_ENV=${env}\nexport NODE_locale=${locale}\nexport QA_GROUP=${groupId}\nexport REPORT_TYPE=${reportType}\nexport RETRIES=${retries}\nexport WORKERS=${workers}\nexport TEST_TIMEOUT=${timeoutMs}\nexport VIDEO_MODE=${videoMode}\nexport SCREENSHOT_MODE=${screenshotMode}\nexport TRACE_MODE=${traceMode}\nexport ARTIFACT_PATH=${artifactPath}\nexport STAGING_BUCKET=${stagingBucket}\nexport STATUS_KEY=status/${executionId}.json\nexport LATEST_KEY=status/${env}/${locale}/${groupId}/latest.json\nexport SPEC_PATH='${specPath || ''}'\nexport TAGS='${tags || ''}'\n\n# Install deps\nDNF=dnf\nif command -v yum >/dev/null; then DNF=yum; fi\n$DNF update -y\n$DNF install -y awscli unzip tar gzip nodejs jq git\n\naws s3 cp s3://${artifactBucket}/runner/bootstrap.sh /tmp/bootstrap.sh\nchmod +x /tmp/bootstrap.sh\n/tmp/bootstrap.sh\n\nshutdown -h now\n`;
+  const userDataScript = `#!/bin/bash\nset -euo pipefail\n\n\nexport EXECUTION_ID=${executionId}\nexport NODE_ENV=${env}\nexport NODE_locale=${locale}\nexport QA_GROUP=${group}\nexport REPORT_TYPE=${reportType}\nexport RETRIES=${retries}\nexport WORKERS=${workers}\nexport TEST_TIMEOUT=${timeoutMs}\nexport VIDEO_MODE=${videoMode}\nexport SCREENSHOT_MODE=${screenshotMode}\nexport TRACE_MODE=${traceMode}\nexport ARTIFACT_PATH=${artifactPath}\nexport STAGING_BUCKET=${stagingBucket}\nexport STATUS_KEY=status/${executionId}.json\nexport LATEST_KEY=status/${env}/${locale}/${group}/latest.json\nexport SPEC_PATH='${specPath || ''}'\nexport TAGS='${tags || ''}'\n\n# Install deps\nDNF=dnf\nif command -v yum >/dev/null; then DNF=yum; fi\n$DNF update -y\n$DNF install -y awscli unzip tar gzip nodejs jq git\n\naws s3 cp s3://${artifactBucket}/runner/bootstrap.sh /tmp/bootstrap.sh\nchmod +x /tmp/bootstrap.sh\n/tmp/bootstrap.sh\n\nshutdown -h now\n`;
 
   return Buffer.from(userDataScript).toString('base64');
 }
@@ -88,13 +88,14 @@ exports.handler = async (event) => {
   }
 
   const body = typeof event.body === 'string' ? JSON.parse(event.body || '{}') : event.body || {};
-  const { env, groupId, locale, runId, reportType = 'allure', instanceType, retries = 0, workers = 2, timeoutMs = 30000, videoMode = 'retain-on-failure', screenshotMode = 'only-on-failure', traceMode = 'retain-on-failure', artifactPath = 'automation-artifact.zip', specPath = '', tags = '' } = body;
+  const { env, group: groupFromPayload, groupId: legacyGroupId, locale, runId, reportType = 'allure', instanceType, retries = 0, workers = 2, timeoutMs = 30000, videoMode = 'retain-on-failure', screenshotMode = 'only-on-failure', traceMode = 'retain-on-failure', artifactPath = 'automation-artifact.zip', specPath = '', tags = '' } = body;
+  const group = groupFromPayload || legacyGroupId;
 
   if (!env || !['nonprod', 'prod'].includes(env)) {
     return buildError('env must be nonprod|prod');
   }
-  if (!groupId) {
-    return buildError('groupId is required');
+  if (!group) {
+    return buildError('group is required');
   }
   if (!locale || !['en', 'fr'].includes(locale)) {
     return buildError('locale must be en|fr');
@@ -103,7 +104,7 @@ exports.handler = async (event) => {
     return buildError('runId is required');
   }
 
-  const executionId = `${groupId}-${runId}`;
+  const executionId = `${group}-${runId}`;
   const now = new Date().toISOString();
 
   const artifactS3Path = resolveArtifactPath(artifactPath);
@@ -113,14 +114,14 @@ exports.handler = async (event) => {
     runId,
     env,
     locale,
-    groupId,
+    group,
     status: 'QUEUED',
     requestedAt: now,
     reportType,
     links: {
-      stagingRoot: `s3://${process.env.STAGING_BUCKET}/staging/${env}/${locale}/${groupId}/runs/${executionId}/`,
-      latestReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${groupId}/latest/index.html`,
-      prevReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${groupId}/prev/index.html`
+      stagingRoot: `s3://${process.env.STAGING_BUCKET}/staging/${env}/${locale}/${group}/runs/${executionId}/`,
+      latestReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${group}/latest/index.html`,
+      prevReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${group}/prev/index.html`
     }
   };
 
@@ -128,7 +129,7 @@ exports.handler = async (event) => {
 
   const userData = buildUserData({
     env,
-    groupId,
+    group,
     locale,
     executionId,
     reportType,
@@ -161,7 +162,7 @@ exports.handler = async (event) => {
           { Key: 'Project', Value: process.env.ProjectName || 'bloomex-qa-automation' },
           { Key: 'Env', Value: env },
           { Key: 'ExecutionId', Value: executionId },
-          { Key: 'Group', Value: groupId }
+          { Key: 'Group', Value: group }
         ]
       }
     ],
@@ -173,8 +174,8 @@ exports.handler = async (event) => {
   const response = {
     executionId,
     statusUrl: `${process.env.VIEWER_BASE_URL}/api/status?executionId=${executionId}`,
-    latestReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${groupId}/latest/index.html`,
-    prevReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${groupId}/prev/index.html`
+    latestReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${group}/latest/index.html`,
+    prevReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${group}/prev/index.html`
   };
 
   return {
