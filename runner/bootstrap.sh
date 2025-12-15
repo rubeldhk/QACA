@@ -27,9 +27,13 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 echo "[INFO] Starting runner for $QA_GROUP ($NODE_ENV/$NODE_locale) executionId=$EXECUTION_ID"
 
 # Helper to push status to S3
+LATEST_STATUS_URI="s3://${STAGING_BUCKET}/${LATEST_KEY}"
+PREV_STATUS_URI="${LATEST_STATUS_URI/\/latest.json/\/prev.json}"
+
 push_status() {
   local status="$1"
   local extra="$2"
+  local update_prev="${3:-false}"
   local payload
   payload=$(jq -n \
     --arg executionId "$EXECUTION_ID" \
@@ -42,15 +46,25 @@ push_status() {
     '{executionId:$executionId,status:$status,env:$env,locale:$locale,groupId:$groupId,reportType:$reportType} + $data')
 
   printf '%s' "$payload" >"/tmp/status-${EXECUTION_ID}.json"
+
+  if [[ "$update_prev" == "true" ]]; then
+    aws s3 cp "$LATEST_STATUS_URI" "$PREV_STATUS_URI" --content-type application/json || true
+  fi
+
   aws s3 cp "/tmp/status-${EXECUTION_ID}.json" "s3://${STAGING_BUCKET}/${STATUS_KEY}" --content-type application/json
-  aws s3 cp "/tmp/status-${EXECUTION_ID}.json" "s3://${STAGING_BUCKET}/${LATEST_KEY}" --content-type application/json
+  aws s3 cp "/tmp/status-${EXECUTION_ID}.json" "$LATEST_STATUS_URI" --content-type application/json
 }
 
-push_status "BOOTSTRAPPING" '{}'
+push_status "BOOTSTRAPPING" '{}' true
 
 cd "$RUN_DIR"
 
-aws s3 cp "s3://${ARTIFACT_PATH}" automation.zip
+ARTIFACT_SRC="$ARTIFACT_PATH"
+if [[ "$ARTIFACT_SRC" != s3://* ]]; then
+  ARTIFACT_SRC="s3://${ARTIFACT_SRC}"
+fi
+
+aws s3 cp "$ARTIFACT_SRC" automation.zip
 unzip -q automation.zip
 
 if [[ -f package-lock.json ]]; then
@@ -118,5 +132,11 @@ aws s3 sync playwright-report "$REPORT_ROOT/playwright-report" || true
 aws s3 cp "$LOG_FILE" "$REPORT_ROOT/runner.log" || true
 
 push_status "$FINAL_STATUS" "$STATUS_EXTRA"
+
+echo "[INFO] Promoting reports to latest/prev"
+LATEST_REPORT_PREFIX="s3://${STAGING_BUCKET}/reports/${NODE_ENV}/${NODE_locale}/${QA_GROUP}/latest"
+PREV_REPORT_PREFIX="s3://${STAGING_BUCKET}/reports/${NODE_ENV}/${NODE_locale}/${QA_GROUP}/prev"
+aws s3 sync "$LATEST_REPORT_PREFIX/" "$PREV_REPORT_PREFIX/" --delete || true
+aws s3 sync "${REPORT_ROOT}/allure-report/" "$LATEST_REPORT_PREFIX/" --delete || true
 
 echo "[INFO] Run complete with status $FINAL_STATUS"

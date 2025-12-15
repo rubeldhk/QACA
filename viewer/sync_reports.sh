@@ -8,7 +8,5 @@ set -euo pipefail
 
 mkdir -p "$REPORT_ROOT" "$STATUS_ROOT"
 
-aws s3 sync "s3://${STAGING_BUCKET}/staging/" "$REPORT_ROOT/" --delete || true
+aws s3 sync "s3://${STAGING_BUCKET}/reports/" "$REPORT_ROOT/" --delete || true
 aws s3 sync "s3://${STAGING_BUCKET}/status/" "$STATUS_ROOT/" --delete || true
-
-/opt/bloomex/rotate_latest_prev.sh "$REPORT_ROOT" "$REPORTS_TO_KEEP" "$STATUS_ROOT"
