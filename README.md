@@ -179,6 +179,23 @@ From `package.json`:
  - `allure:generate`: generate Allure report
  - `allure:open`: open Allure report
 
+## QA Automation On-Demand (Playwright + Allure)
+
+- Dashboard: `QAautomation.html` lives on the always-on viewer EC2 behind an ALB. `/` renders the dashboard, `/reports/` serves Allure/Playwright static reports, `/api/status` reads status JSON files synced from S3.
+- Trigger: Lambda Function URL (CORS enabled) launches an EC2 runner with the requested env/locale/group/reportType. The Lambda writes initial status JSON to S3 and returns `executionId`, status URL, and report links.
+- Runner: High-power EC2 downloads the automation artifact zip from the artifact bucket, runs Playwright with Allure, uploads results to the staging bucket, pushes final status, and terminates itself.
+- Viewer sync: systemd timer on the viewer EC2 syncs from the staging bucket every minute, rotates `latest`/`prev`, and keeps `runs/<executionId>` archives (default 10).
+- Storage: EBS volume (retained) mounted at `/var/www` for reports + status. Staging is S3; the artifact bucket stores the test zip and viewer scripts.
+
+### Runtime toggles surfaced by the runner
+- `workers`, `retries`, `reportType`, `env`, `locale`, `groupId`, optional `specPath` or `--grep` tag selection.
+- Evidence tuning via env vars consumed by Playwright: `PW_VIDEO`, `PW_SCREENSHOT`, `PW_TRACE` (values: `on`, `retain-on-failure`, `off`); `PW_TEST_TIMEOUT` for default test timeout.
+- Use `NODE_ENV` + `NODE_locale` to pick the correct `.env` file in `src/config/.env.$NODE_ENV` and locale URLs.
+
+### Locator and coverage guidance (lightweight)
+- Prefer `data-testid` attributes for stable selectors; avoid brittle XPath. Track XPath usage opportunistically by searching for `xpath=` strings in specs and pages.
+- For faster auth reuse, consider Playwright `storageState` per locale/env and load it in fixtures (not enforced by this change).
+
 ## Notes
 
 - Base URL is selected in `playwright.config.ts` using `NODE_locale`:
