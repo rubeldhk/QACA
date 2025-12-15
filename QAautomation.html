@@ -91,231 +91,155 @@
     @media(max-width: 768px) { iframe { height: 50vh; } .columns { grid-template-columns: 1fr; } }
   </style>
 </head>
-<body data-trigger-url="">
+<body>
   <header>
     <div>
       <h1>Bloomex QA Automation On-Demand</h1>
-      <div class="sub">Trigger Playwright + Allure runs, view the last two executions, and compare side-by-side.</div>
+      <div class="sub">Trigger Playwright runs straight from your browser. The Function URL is protected by a shared token.</div>
     </div>
-    <div class="panel" style="min-width:320px;">
-      <div class="filters">
+  </header>
+
+  <main class="grid" style="padding-bottom:120px;">
+    <section class="panel">
+      <h3 style="margin-top:0;">Launch a run</h3>
+      <p class="muted" style="margin-top:4px;">Select a group and locale, then click Run QA. The request is sent via the Function URL using a shared header token.</p>
+      <div class="filters" style="margin-top:14px;">
         <div>
-          <label for="environment">Environment</label>
-          <select id="environment">
-            <option value="stage">Stage</option>
-            <option value="prod">Production</option>
+          <label for="group">Group</label>
+          <select id="group">
+            <option value="smoke">Smoke</option>
+            <option value="regression">Regression</option>
+            <option value="checkout">Checkout</option>
           </select>
         </div>
         <div>
           <label for="locale">Locale</label>
           <select id="locale">
-            <option value="en">English</option>
-            <option value="fr">French</option>
+            <option value="en">English (en)</option>
+            <option value="fr">French (fr)</option>
           </select>
         </div>
         <div>
-          <label for="reportType">Report</label>
-          <select id="reportType">
-            <option value="allure">Allure</option>
-            <option value="playwright">Playwright HTML</option>
-            <option value="both">Both</option>
-          </select>
-        </div>
-        <div>
-          <label for="tagFilter">Tag/spec filter (optional)</label>
-          <input id="tagFilter" type="text" placeholder="--grep @smoke or src/specs/..." />
-        </div>
-        <div>
-          <label for="workers">Workers</label>
-          <input id="workers" type="number" value="2" min="1" />
-        </div>
-        <div>
-          <label for="retries">Retries</label>
-          <input id="retries" type="number" value="0" min="0" />
+          <label for="token">Shared token</label>
+          <input id="token" type="text" placeholder="Paste QACA token" autocomplete="off" />
         </div>
       </div>
-    </div>
-  </header>
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <button class="btn-primary" id="runBtn" style="max-width:180px;">Run QA</button>
+        <button class="btn-ghost" id="clearBtn" style="max-width:140px;">Clear</button>
+      </div>
+      <div id="result" class="muted" style="margin-top:14px;"></div>
+    </section>
 
-  <section class="grid" id="groupGrid"></section>
-
-  <section class="panel" style="margin:0 24px 120px;">
-    <h3 style="margin-top:0;">Compare latest vs previous</h3>
-    <p class="muted">Choose a group above and click Compare to render both reports side-by-side.</p>
-    <div id="compareArea"></div>
-  </section>
+    <section class="panel">
+      <h3 style="margin-top:0;">Reports</h3>
+      <p class="muted" style="margin-top:4px;">Quick access to the latest and previous reports for the selected group and locale.</p>
+      <div class="filters" style="margin-top:14px;">
+        <div>
+          <label for="reportGroup">Group</label>
+          <select id="reportGroup">
+            <option value="smoke">Smoke</option>
+            <option value="regression">Regression</option>
+            <option value="checkout">Checkout</option>
+          </select>
+        </div>
+        <div>
+          <label for="reportLocale">Locale</label>
+          <select id="reportLocale">
+            <option value="en">English (en)</option>
+            <option value="fr">French (fr)</option>
+          </select>
+        </div>
+      </div>
+      <div class="actions" style="margin-top:16px;">
+        <a id="latestLink" class="btn-primary" href="#" target="_blank" rel="noopener">Open Latest Report</a>
+        <a id="prevLink" class="btn-ghost link-btn" href="#" target="_blank" rel="noopener">Open Previous Report</a>
+      </div>
+      <p class="muted" style="margin-top:12px;">Update <code>viewerBaseUrl</code> in the script to match the deployed viewer hostname.</p>
+    </section>
+  </main>
 
   <div class="run-status" id="runStatus"></div>
 
   <script>
-    const triggerUrl = document.body.dataset.triggerUrl || 'REPLACE_WITH_FUNCTION_URL';
-    const groupConfig = [
-      { id: 'QAATG01', name: 'Homepage Smoke', description: 'Anonymous browsing + top funnel' },
-      { id: 'QAATG02', name: 'Account', description: 'Registration, login, profile' },
-      { id: 'QAATG03', name: 'Checkout', description: 'Cart, payment, coupons' },
-      { id: 'QAATG04', name: 'Delivery', description: 'Address + delivery slot checks' },
-      { id: 'QAATG05', name: 'Search', description: 'Keyword + category search' },
-      { id: 'QAATG06', name: 'Special Collection', description: 'Gift bundles, upsells' },
-      { id: 'QAATG07', name: 'Mobile', description: 'Mobile viewport sanity' },
-      { id: 'QAATG08', name: 'Regression Core', description: 'High-value flows' },
-      { id: 'QAATG09', name: 'Email & Comms', description: 'Mailosaur + notifications' },
-      { id: 'QAATG10', name: 'Experiments', description: 'A/B smoke + feature toggles' }
-    ];
+    const triggerUrl = 'REPLACE_WITH_FUNCTION_URL';
+    const viewerBaseUrl = 'https://viewer.example.com'; // Set to ALB DNS or custom domain.
 
-    let meta = {};
-    const gridEl = document.getElementById('groupGrid');
-    const compareArea = document.getElementById('compareArea');
-    const runStatus = document.getElementById('runStatus');
+    function buildReportLinks() {
+      const group = document.getElementById('reportGroup').value;
+      const locale = document.getElementById('reportLocale').value;
+      const latest = `${viewerBaseUrl}/reports/nonprod/${locale}/${group}/latest/index.html`;
+      const previous = `${viewerBaseUrl}/reports/nonprod/${locale}/${group}/prev/index.html`;
+      document.getElementById('latestLink').href = latest;
+      document.getElementById('prevLink').href = previous;
+    }
 
-    async function loadMeta() {
-      try {
-        const res = await fetch('/api/summary');
-        if (res.ok) {
-          meta = await res.json();
-        }
-      } catch (e) {
-        console.warn('meta load failed', e);
+    function setStatus(message, isError = false) {
+      const result = document.getElementById('result');
+      result.textContent = message;
+      result.style.color = isError ? 'var(--fail)' : 'var(--muted)';
+    }
+
+    function formattedRunId() {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    }
+
+    async function triggerRun() {
+      const group = document.getElementById('group').value;
+      const locale = document.getElementById('locale').value;
+      const token = document.getElementById('token').value.trim();
+      if (!token) {
+        setStatus('Token is required to trigger the run.', true);
+        return;
       }
-      renderGroups();
-    }
-
-    function summaryFor(env, locale, groupId) {
-      return (((meta || {})[env] || {})[locale] || {})[groupId] || {};
-    }
-
-    function renderGroups() {
-      const env = document.getElementById('environment').value;
-      const locale = document.getElementById('locale').value;
-      gridEl.innerHTML = '';
-      groupConfig.forEach((g) => {
-        const summary = summaryFor(env, locale, g.id);
-        const last = summary.latest || '—';
-        const prev = summary.prev || '—';
-        const latestUrl = `/reports/${env}/${locale}/${g.id}/latest/index.html`;
-        const prevUrl = `/reports/${env}/${locale}/${g.id}/prev/index.html`;
-        const statusBadge = summary.status || 'Pending';
-        const statusClass = statusBadge === 'PASS' ? 'pass' : statusBadge === 'FAIL' ? 'fail' : 'running';
-        const duration = summary.durationSeconds ? `${summary.durationSeconds}s` : '—';
-
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.innerHTML = `
-          <div class="card-header">
-            <div>
-              <div style="font-weight:700;font-size:15px;">${g.name}</div>
-              <div class="muted">${g.description}</div>
-            </div>
-            <div style="display:flex;gap:6px;">
-              <span class="badge badge-env">${env}</span>
-              <span class="badge badge-locale">${locale}</span>
-            </div>
-          </div>
-          <div class="compare-grid">
-            <div class="pill">Latest run: <strong>${last}</strong></div>
-            <div class="pill">Previous: <strong>${prev}</strong></div>
-            <div class="pill">Duration: <strong>${duration}</strong></div>
-            <div class="pill status"><span class="dot ${statusClass}"></span>${statusBadge}</div>
-          </div>
-          <div class="actions">
-            <button class="btn-primary" onclick="triggerRun('${g.id}')">Run</button>
-            <a class="btn-ghost link-btn" href="${latestUrl}" target="_blank">Open Latest</a>
-            <a class="btn-ghost link-btn" href="${prevUrl}" target="_blank">Open Previous</a>
-            <button class="btn-ghost" onclick="showCompare('${g.id}')">Compare</button>
-          </div>
-        `;
-        gridEl.appendChild(card);
-      });
-    }
-
-    async function triggerRun(groupId) {
-      const env = document.getElementById('environment').value;
-      const locale = document.getElementById('locale').value;
-      const reportType = document.getElementById('reportType').value;
-      const workers = Number(document.getElementById('workers').value || 2);
-      const retries = Number(document.getElementById('retries').value || 0);
-      const tagFilter = document.getElementById('tagFilter').value.trim();
 
       const payload = {
-        env,
+        env: 'nonprod',
         locale,
-        groupId,
-        reportType,
-        workers,
-        retries
+        group,
+        runId: formattedRunId(),
       };
 
-      if (tagFilter.startsWith('--grep')) {
-        payload.tags = tagFilter.replace('--grep', '').trim();
-      } else if (tagFilter.length) {
-        payload.specPath = tagFilter;
-      }
-
-      runStatus.classList.add('show');
-      runStatus.innerHTML = `<div style="font-weight:700;">Triggering ${groupId} on ${env}/${locale}...</div><div class="muted">Sending to ${triggerUrl}</div>`;
+      setStatus(`Sending request for ${group} (${locale})...`);
 
       try {
         const res = await fetch(triggerUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          headers: {
+            'Content-Type': 'application/json',
+            'x-qaca-token': token,
+          },
+          body: JSON.stringify(payload),
         });
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+
+        if (res.status === 401) {
+          setStatus('Unauthorized: token rejected.', true);
+          return;
         }
+
+        if (!res.ok) {
+          setStatus(`Failed: HTTP ${res.status}`, true);
+          return;
+        }
+
         const data = await res.json();
-        runStatus.innerHTML = `<div><strong>Execution:</strong> ${data.executionId}</div><div class="muted">Polling status...</div>`;
-        pollStatus(data.statusUrl);
-      } catch (e) {
-        runStatus.innerHTML = `<div style="color:var(--fail);">Failed to trigger: ${e.message}</div>`;
+        setStatus(`Success! ${data.message}. Instance: ${data.instanceId}`);
+      } catch (err) {
+        setStatus(`Error triggering run: ${err.message}`, true);
       }
     }
 
-    async function pollStatus(statusUrl) {
-      let attempts = 0;
-      const interval = setInterval(async () => {
-        attempts += 1;
-        try {
-          const res = await fetch(statusUrl);
-          if (!res.ok) return;
-          const data = await res.json();
-          const status = data.status || 'RUNNING';
-          runStatus.innerHTML = `<div><strong>Execution:</strong> ${data.executionId}</div><div>Status: ${status}</div>`;
-          if (status === 'PASS' || status === 'FAIL') {
-            clearInterval(interval);
-            runStatus.innerHTML += `<div><a class="link-btn" href="/reports/${data.env}/${data.locale}/${data.groupId}/latest/index.html" target="_blank">Open report</a></div>`;
-            loadMeta();
-          }
-          if (attempts > 60) clearInterval(interval);
-        } catch (e) {
-          console.warn('poll error', e);
-        }
-      }, 5000);
-    }
+    document.getElementById('runBtn').addEventListener('click', triggerRun);
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      document.getElementById('token').value = '';
+      setStatus('');
+    });
 
-    function showCompare(groupId) {
-      const env = document.getElementById('environment').value;
-      const locale = document.getElementById('locale').value;
-      const latestUrl = `/reports/${env}/${locale}/${groupId}/latest/index.html`;
-      const prevUrl = `/reports/${env}/${locale}/${groupId}/prev/index.html`;
-      compareArea.innerHTML = `
-        <div class="columns">
-          <div>
-            <div class="muted">Latest</div>
-            <iframe src="${latestUrl}"></iframe>
-          </div>
-          <div>
-            <div class="muted">Previous</div>
-            <iframe src="${prevUrl}"></iframe>
-          </div>
-        </div>
-      `;
-      compareArea.scrollIntoView({ behavior: 'smooth' });
-    }
-
-    document.getElementById('environment').addEventListener('change', renderGroups);
-    document.getElementById('locale').addEventListener('change', renderGroups);
-
-    loadMeta();
+    document.getElementById('reportGroup').addEventListener('change', buildReportLinks);
+    document.getElementById('reportLocale').addEventListener('change', buildReportLinks);
+    buildReportLinks();
   </script>
 </body>
 </html>
