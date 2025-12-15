@@ -10,7 +10,8 @@ const requiredEnv = [
   'RUNNER_SECURITY_GROUP',
   'RUNNER_SUBNET',
   'DEFAULT_INSTANCE_TYPE',
-  'VIEWER_BASE_URL'
+  'VIEWER_BASE_URL',
+  'QACA_TOKEN'
 ];
 
 function validateEnv() {
@@ -47,6 +48,21 @@ function buildUserData(params) {
   return Buffer.from(userDataScript).toString('base64');
 }
 
+function resolveArtifactPath(artifactPath) {
+  const artifactBucket = process.env.ARTIFACT_BUCKET;
+  const path = (artifactPath || 'automation-artifact.zip').replace(/^\//, '');
+  if (path.startsWith('s3://')) {
+    return path;
+  }
+  return `s3://${artifactBucket}/${path}`;
+}
+
+function readHeader(headers, name) {
+  if (!headers) return undefined;
+  const matchKey = Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase());
+  return matchKey ? headers[matchKey] : undefined;
+}
+
 async function writeStatus(executionId, statusPayload) {
   const params = {
     Bucket: process.env.STAGING_BUCKET,
@@ -60,15 +76,22 @@ async function writeStatus(executionId, statusPayload) {
 exports.handler = async (event) => {
   validateEnv();
 
+  const corsHeaders = buildCors();
+
   if (event.requestContext && event.requestContext.http && event.requestContext.http.method === 'OPTIONS') {
-    return { statusCode: 200, headers: buildCors(), body: '' };
+    return { statusCode: 200, headers: corsHeaders, body: '' };
+  }
+
+  const providedToken = readHeader(event.headers, 'x-qaca-token');
+  if (!providedToken || providedToken !== process.env.QACA_TOKEN) {
+    return { statusCode: 401, headers: corsHeaders, body: JSON.stringify({ error: 'unauthorized' }) };
   }
 
   const body = typeof event.body === 'string' ? JSON.parse(event.body || '{}') : event.body || {};
-  const { env, groupId, locale, reportType = 'allure', instanceType, retries = 0, workers = 2, timeoutMs = 30000, videoMode = 'retain-on-failure', screenshotMode = 'only-on-failure', traceMode = 'retain-on-failure', artifactPath = 'artifacts/automation.zip', specPath = '', tags = '' } = body;
+  const { env, groupId, locale, runId, reportType = 'allure', instanceType, retries = 0, workers = 2, timeoutMs = 30000, videoMode = 'retain-on-failure', screenshotMode = 'only-on-failure', traceMode = 'retain-on-failure', artifactPath = 'automation-artifact.zip', specPath = '', tags = '' } = body;
 
-  if (!env || !['stage', 'prod'].includes(env)) {
-    return buildError('env must be stage|prod');
+  if (!env || !['nonprod', 'prod'].includes(env)) {
+    return buildError('env must be nonprod|prod');
   }
   if (!groupId) {
     return buildError('groupId is required');
@@ -76,12 +99,18 @@ exports.handler = async (event) => {
   if (!locale || !['en', 'fr'].includes(locale)) {
     return buildError('locale must be en|fr');
   }
+  if (!runId) {
+    return buildError('runId is required');
+  }
 
-  const executionId = `${groupId}-${Date.now()}`;
+  const executionId = `${groupId}-${runId}`;
   const now = new Date().toISOString();
+
+  const artifactS3Path = resolveArtifactPath(artifactPath);
 
   const statusPayload = {
     executionId,
+    runId,
     env,
     locale,
     groupId,
@@ -107,7 +136,7 @@ exports.handler = async (event) => {
     retries,
     workers,
     timeoutMs,
-    artifactPath,
+    artifactPath: artifactS3Path,
     videoMode,
     screenshotMode,
               traceMode,
@@ -166,7 +195,7 @@ function buildError(message) {
 function buildCors() {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': '*',
+    'Access-Control-Allow-Headers': 'content-type,x-qaca-token',
     'Access-Control-Allow-Methods': 'OPTIONS,POST'
   };
 }
