@@ -1,7 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: >-
-  Bloomex QA Automation On-Demand. Provisions report viewer, staging buckets, runner roles,
-  and trigger Lambda with Function URL.
+Description: Bloomex QA Automation On-Demand (viewer + ALB + runner trigger). Clean template.
 
 Parameters:
   ProjectName:
@@ -18,151 +16,117 @@ Parameters:
     Description: VPC to host the ALB and EC2 instances.
   PublicSubnets:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: Two public subnets for ALB/EC2 (must belong to the provided VPC).
+    Description: At least two public subnets in different AZs for ALB and EC2.
   ViewerInstanceType:
     Type: String
     Default: t3.small
     Description: Instance type for always-on report viewer.
+  ViewerAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI for the viewer EC2.
+  KeyPairName:
+    Type: String
+    Default: ""
+    Description: Optional key pair for EC2 troubleshooting (leave empty to disable SSH).
+  ArtifactBucketName:
+    Type: String
+    Description: Existing S3 bucket containing automation-artifact.zip (you already created this).
+  ArtifactZipKey:
+    Type: String
+    Default: automation-artifact.zip
+    Description: Key in ArtifactBucketName for the artifact zip.
+  ReportsBucketName:
+    Type: String
+    Description: Existing S3 bucket for reports (Allure history + last runs). Viewer syncs from this bucket.
+  RunnerAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI for the on-demand runner EC2.
   RunnerDefaultInstanceType:
     Type: String
     Default: c7i.2xlarge
-    Description: Default compute for on-demand runner. Lambda parameter overrides per run.
-  ViewerAmiId:
-    Type: AWS::EC2::Image::Id
-    Default: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64}}'
-    Description: AMI for the viewer EC2.
-  RunnerAmiId:
-    Type: AWS::EC2::Image::Id
-    Default: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64}}'
-    Description: AMI for the runner EC2.
-  KeyPairName:
-    Type: String
-    Default: ''
-    Description: Optional key pair for EC2 troubleshooting (leave empty to disable SSH).
-  ViewerVolumeSize:
-    Type: Number
-    Default: 50
-    Description: Size (GiB) for the persistent EBS volume that stores reports and status.
-  StagingRetentionDays:
-    Type: Number
-    Default: 14
-    Description: Lifecycle rule to transition staging objects to Intelligent-Tiering and expire incomplete uploads.
-  ReportsToKeep:
-    Type: Number
-    Default: 10
-    Description: Number of archived runs to keep per {env,locale,groupId}.
-
-Mappings:
-  Tags:
-    Defaults:
-      Owner: qa
+    Description: Default compute for on-demand runner.
 
 Conditions:
-  HasKeyPair: !Not [!Equals [!Ref KeyPairName, '']]
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, ""]]
 
 Resources:
-  ArtifactBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      VersioningConfiguration:
-        Status: Enabled
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref EnvironmentName
-        - Key: Owner
-          Value: !FindInMap [Tags, Defaults, Owner]
-
-  StagingBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      NotificationConfiguration: {}
-      LifecycleConfiguration:
-        Rules:
-          - Id: ExpireIncompleteUploads
-            Status: Enabled
-            AbortIncompleteMultipartUpload:
-              DaysAfterInitiation: 7
-          - Id: IntelligentTiering
-            Status: Enabled
-            Transitions:
-              - TransitionInDays: !Ref StagingRetentionDays
-                StorageClass: INTELLIGENT_TIERING
-      VersioningConfiguration:
-        Status: Enabled
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref EnvironmentName
-        - Key: Owner
-          Value: !FindInMap [Tags, Defaults, Owner]
-
-  ViewerSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow ALB to reach viewer
-      VpcId: !Ref VpcId
-      SecurityGroupIngress: []
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-${EnvironmentName}-viewer-sg'
-
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow HTTPS/HTTP
+      GroupDescription: !Sub "${ProjectName}-${EnvironmentName}-alb-sg"
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${EnvironmentName}-alb-sg'
+          Value: !Sub "${ProjectName}-${EnvironmentName}-alb-sg"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  ViewerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ALB to reach viewer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-viewer-sg"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
 
   Alb:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Scheme: internet-facing
-      SecurityGroups: [!Ref AlbSecurityGroup]
-      Subnets: !Ref PublicSubnets
       Type: application
+      IpAddressType: ipv4
+      Subnets: !Ref PublicSubnets
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${EnvironmentName}-alb'
+          Value: !Sub "${ProjectName}-${EnvironmentName}-alb"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
 
   AlbTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       VpcId: !Ref VpcId
-      Port: 80
       Protocol: HTTP
+      Port: 80
       TargetType: instance
+      HealthCheckProtocol: HTTP
       HealthCheckPath: /
+      Matcher:
+        HttpCode: "200-399"
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${EnvironmentName}-tg'
+          Value: !Sub "${ProjectName}-${EnvironmentName}-viewer-tg"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
 
   AlbListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -178,551 +142,316 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
-      Path: /
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
       Policies:
-        - PolicyName: ViewerS3Access
+        - PolicyName: ViewerS3ReportsAccess
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:GetObject
                   - s3:ListBucket
                 Resource:
-                  - !Sub '${StagingBucket.Arn}'
-                  - !Sub '${StagingBucket.Arn}/*'
+                  - !Sub "arn:aws:s3:::${ReportsBucketName}"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${ReportsBucketName}/*"
+        - PolicyName: ViewerElbRegister
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                Resource: "*"
+        - PolicyName: ViewerLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
       Tags:
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
+        - Key: Environment
           Value: !Ref EnvironmentName
 
   ViewerInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      Roles: [!Ref ViewerRole]
-      Path: /
-
-  ViewerVolume:
-    Type: AWS::EC2::Volume
-    DeletionPolicy: Retain
-    Properties:
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Size: !Ref ViewerVolumeSize
-      VolumeType: gp3
-      Encrypted: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${ProjectName}-${EnvironmentName}-reports-volume'
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Env
-          Value: !Ref EnvironmentName
+      Roles:
+        - !Ref ViewerRole
 
   ViewerInstance:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !Ref ViewerAmiId
       InstanceType: !Ref ViewerInstanceType
+      SubnetId: !Select [0, !Ref PublicSubnets]
+      SecurityGroupIds:
+        - !Ref ViewerSecurityGroup
       IamInstanceProfile: !Ref ViewerInstanceProfile
-      KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue']
-      NetworkInterfaces:
-        - DeviceIndex: 0
-          AssociatePublicIpAddress: true
-          SubnetId: !Select [0, !Ref PublicSubnets]
-          GroupSet: [!Ref ViewerSecurityGroup, !Ref AlbSecurityGroup]
-      BlockDeviceMappings:
-        - DeviceName: /dev/xvda
-          Ebs:
-            DeleteOnTermination: true
-            VolumeSize: 20
-            VolumeType: gp3
-        - DeviceName: /dev/xvdf
-          Ebs:
-            DeleteOnTermination: false
-            VolumeSize: !Ref ViewerVolumeSize
-            VolumeType: gp3
+      KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref "AWS::NoValue"]
       Tags:
         - Key: Name
-          Value: !Sub '${ProjectName}-${EnvironmentName}-viewer'
+          Value: !Sub "${ProjectName}-${EnvironmentName}-viewer"
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
+        - Key: Environment
           Value: !Ref EnvironmentName
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          set -euo pipefail
-          dnf update -y
-          dnf install -y nginx awscli jq nodejs git
+          set -euxo pipefail
 
-          cat >/etc/nginx/conf.d/qaautomation.conf <<'NGINXCONF'
-          server {
-            listen 80 default_server;
-            server_name _;
-
-            root /var/www;
-            index QAautomation.html index.html;
-
-            location /api/ {
-              proxy_pass http://127.0.0.1:3001/;
-              proxy_http_version 1.1;
-              proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
-            }
-
-            location /reports/ {
-              alias /var/www/reports/;
-              autoindex on;
-            }
-
-            location / {
-              try_files $uri $uri/ /QAautomation.html;
-            }
-          }
-          NGINXCONF
-
+          dnf -y update
+          dnf -y install nginx awscli jq
           systemctl enable nginx
           systemctl start nginx
 
-          # Mount reports volume
-          if ! lsblk | grep -q xvdf; then
-            echo "[WARN] /dev/xvdf not found; reports volume may not be attached" >&2
-          else
-            mkfs.xfs -f /dev/xvdf || true
-            mkdir -p /var/www
-            echo '/dev/xvdf /var/www xfs defaults,nofail 0 2' >> /etc/fstab
-            mount -a
-          fi
+          mkdir -p /usr/share/nginx/html/reports
+          cat >/etc/nginx/conf.d/reports.conf <<'EOF'
+          server {
+            listen 80 default_server;
+            server_name _;
+            root /usr/share/nginx/html;
+            location / {
+              try_files $uri $uri/ =404;
+            }
+          }
+          EOF
+          nginx -t && systemctl restart nginx
 
-          mkdir -p /var/www/reports /var/www/status /opt/bloomex
+          # Register this instance into the ALB target group (breaks CFN dependency cycles)
+          IID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+          aws elbv2 register-targets --region ${AWS::Region} --target-group-arn ${AlbTargetGroup} --targets Id=$IID,Port=80 || true
 
-          # Fetch dashboard and helper scripts from artifact bucket
-          aws s3 cp s3://${ArtifactBucket}/viewer/QAautomation.html /var/www/QAautomation.html || true
-          aws s3 cp s3://${ArtifactBucket}/viewer/status-server.js /opt/bloomex/status-server.js || true
-          aws s3 cp s3://${ArtifactBucket}/viewer/sync_reports.sh /opt/bloomex/sync_reports.sh || true
-          aws s3 cp s3://${ArtifactBucket}/viewer/rotate_latest_prev.sh /opt/bloomex/rotate_latest_prev.sh || true
+          # Sync reports from S3 (Allure history / last runs)
+          aws s3 sync s3://${ReportsBucketName}/reports/ /usr/share/nginx/html/reports/ --delete || true
 
-          cd /opt/bloomex
-          npm init -y >/dev/null 2>&1 || true
-          npm install express cors >/dev/null 2>&1 || true
-          cd -
+          # Cron: refresh every 2 minutes
+          cat >/etc/cron.d/reports-sync <<EOF
+          */2 * * * * root aws s3 sync s3://${ReportsBucketName}/reports/ /usr/share/nginx/html/reports/ --delete >/var/log/reports-sync.log 2>&1
+          EOF
 
-          chmod +x /opt/bloomex/sync_reports.sh /opt/bloomex/rotate_latest_prev.sh
-
-          cat >/etc/systemd/system/bloomex-status.service <<'SERVICE'
-          [Unit]
-          Description=Bloomex QA Automation status API
-          After=network.target
-
-          [Service]
-          ExecStart=/usr/bin/node /opt/bloomex/status-server.js
-          WorkingDirectory=/opt/bloomex
-          Restart=always
-          User=nobody
-          Environment=PORT=3001
-          Environment=STATUS_DIR=/var/www/status
-          Environment=REPORT_META=/var/www/reports/meta.json
-
-          [Install]
-          WantedBy=multi-user.target
-          SERVICE
-
-          systemctl daemon-reload
-          systemctl enable bloomex-status.service
-          systemctl start bloomex-status.service
-
-          cat >/opt/bloomex/sync.env <<'SHELLVARS'
-          STAGING_BUCKET=${StagingBucket}
-          REPORT_ROOT=/var/www/reports
-          STATUS_ROOT=/var/www/status
-          REPORTS_TO_KEEP=${ReportsToKeep}
-          SHELLVARS
-
-          cat >/etc/systemd/system/bloomex-sync.service <<'SERVICE'
-          [Unit]
-          Description=Sync reports from staging to viewer
-          After=network-online.target
-          Wants=network-online.target
-
-          [Service]
-          Type=oneshot
-          EnvironmentFile=/opt/bloomex/sync.env
-          ExecStart=/opt/bloomex/sync_reports.sh
-          SERVICE
-
-          cat >/etc/systemd/system/bloomex-sync.timer <<'TIMER'
-          [Unit]
-          Description=Run report sync every minute
-
-          [Timer]
-          OnBootSec=1min
-          OnUnitActiveSec=1min
-          AccuracySec=30s
-
-          [Install]
-          WantedBy=timers.target
-          TIMER
-
-          systemctl daemon-reload
-          systemctl enable bloomex-sync.timer
-          systemctl start bloomex-sync.timer
-
-          # Attach to target group
-          INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-          aws elbv2 register-targets --target-group-arn ${AlbTargetGroup} --targets Id=$INSTANCE_ID || true
-
-  ViewerVolumeAttachment:
-    Type: AWS::EC2::VolumeAttachment
+  RunnerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      Device: /dev/xvdf
-      InstanceId: !Ref ViewerInstance
-      VolumeId: !Ref ViewerVolume
-
-  TriggerLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: RunnerControl
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ec2:RunInstances
-                  - ec2:TerminateInstances
-                  - ec2:DescribeInstances
-                  - ec2:DescribeInstanceStatus
-                  - ec2:CreateTags
-                  - iam:PassRole
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:PutObjectAcl
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !Sub '${StagingBucket.Arn}'
-                  - !Sub '${StagingBucket.Arn}/*'
+      GroupDescription: Runner outbound only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
       Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-runner-sg"
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
+        - Key: Environment
           Value: !Ref EnvironmentName
-
-  TriggerLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub '${ProjectName}-${EnvironmentName}-trigger'
-      Runtime: nodejs18.x
-      Role: !GetAtt TriggerLambdaRole.Arn
-      Handler: index.handler
-      Timeout: 30
-      MemorySize: 256
-      Environment:
-        Variables:
-          STAGING_BUCKET: !Ref StagingBucket
-          ARTIFACT_BUCKET: !Ref ArtifactBucket
-          RUNNER_AMI: !Ref RunnerAmiId
-          RUNNER_INSTANCE_PROFILE: !Ref RunnerInstanceProfile
-          RUNNER_SECURITY_GROUP: !Ref ViewerSecurityGroup
-          RUNNER_SUBNET: !Select [0, !Ref PublicSubnets]
-          DEFAULT_INSTANCE_TYPE: !Ref RunnerDefaultInstanceType
-          VIEWER_BASE_URL: !Sub 'http://${Alb.DNSName}'
-      Code:
-        ZipFile: |
-          const AWS = require('aws-sdk');
-          const ec2 = new AWS.EC2();
-          const s3 = new AWS.S3();
-
-          const requiredEnv = [
-            'STAGING_BUCKET',
-            'ARTIFACT_BUCKET',
-            'RUNNER_AMI',
-            'RUNNER_INSTANCE_PROFILE',
-            'RUNNER_SECURITY_GROUP',
-            'RUNNER_SUBNET',
-            'DEFAULT_INSTANCE_TYPE',
-            'VIEWER_BASE_URL'
-          ];
-
-          function validateEnv() {
-            const missing = requiredEnv.filter((key) => !process.env[key]);
-            if (missing.length) {
-              throw new Error(`Missing environment variables: ${missing.join(', ')}`);
-            }
-          }
-
-          function buildUserData(params) {
-            const {
-              env,
-              groupId,
-              locale,
-              executionId,
-              reportType,
-              instanceType,
-              retries,
-              workers,
-              timeoutMs,
-              artifactPath,
-              videoMode,
-              screenshotMode,
-              traceMode,
-              specPath,
-              tags
-            } = params;
-
-            const stagingBucket = process.env.STAGING_BUCKET;
-            const artifactBucket = process.env.ARTIFACT_BUCKET;
-
-            const userDataScript = `#!/bin/bash\nset -euo pipefail\n\n\nexport EXECUTION_ID=${executionId}\nexport NODE_ENV=${env}\nexport NODE_locale=${locale}\nexport QA_GROUP=${groupId}\nexport REPORT_TYPE=${reportType}\nexport RETRIES=${retries}\nexport WORKERS=${workers}\nexport TEST_TIMEOUT=${timeoutMs}\nexport VIDEO_MODE=${videoMode}\nexport SCREENSHOT_MODE=${screenshotMode}\nexport TRACE_MODE=${traceMode}\nexport ARTIFACT_PATH=${artifactPath}\nexport STAGING_BUCKET=${stagingBucket}\nexport STATUS_KEY=status/${executionId}.json\nexport LATEST_KEY=status/${env}/${locale}/${groupId}/latest.json\nexport SPEC_PATH='${specPath || ''}'\nexport TAGS='${tags || ''}'\n\n# Install deps\nDNF=dnf\nif command -v yum >/dev/null; then DNF=yum; fi\n$DNF update -y\n$DNF install -y awscli unzip tar gzip nodejs jq git\n\naws s3 cp s3://${artifactBucket}/runner/bootstrap.sh /tmp/bootstrap.sh\nchmod +x /tmp/bootstrap.sh\n/tmp/bootstrap.sh\n\nshutdown -h now\n`;
-
-            return Buffer.from(userDataScript).toString('base64');
-          }
-
-          async function writeStatus(executionId, statusPayload) {
-            const params = {
-              Bucket: process.env.STAGING_BUCKET,
-              Key: `status/${executionId}.json`,
-              Body: JSON.stringify(statusPayload, null, 2),
-              ContentType: 'application/json'
-            };
-            await s3.putObject(params).promise();
-            await s3
-              .putObject({
-                Bucket: process.env.STAGING_BUCKET,
-                Key: `status/${statusPayload.env}/${statusPayload.locale}/${statusPayload.groupId}/latest.json`,
-                Body: JSON.stringify(statusPayload, null, 2),
-                ContentType: 'application/json'
-              })
-              .promise();
-          }
-
-          exports.handler = async (event) => {
-            validateEnv();
-
-            if (event.requestContext && event.requestContext.http && event.requestContext.http.method === 'OPTIONS') {
-              return { statusCode: 200, headers: buildCors(), body: '' };
-            }
-
-            const body = typeof event.body === 'string' ? JSON.parse(event.body || '{}') : event.body || {};
-            const {
-              env,
-              groupId,
-              locale,
-              reportType = 'allure',
-              instanceType,
-              retries = 0,
-              workers = 2,
-              timeoutMs = 30000,
-              videoMode = 'retain-on-failure',
-              screenshotMode = 'only-on-failure',
-              traceMode = 'retain-on-failure',
-              artifactPath = 'artifacts/automation.zip',
-              specPath = '',
-              tags = ''
-            } = body;
-
-            if (!env || !['stage', 'prod'].includes(env)) {
-              return buildError('env must be stage|prod');
-            }
-            if (!groupId) {
-              return buildError('groupId is required');
-            }
-            if (!locale || !['en', 'fr'].includes(locale)) {
-              return buildError('locale must be en|fr');
-            }
-
-            const executionId = `${groupId}-${Date.now()}`;
-            const now = new Date().toISOString();
-
-            const statusPayload = {
-              executionId,
-              env,
-              locale,
-              groupId,
-              status: 'QUEUED',
-              requestedAt: now,
-              reportType,
-              links: {
-                stagingRoot: `s3://${process.env.STAGING_BUCKET}/staging/${env}/${locale}/${groupId}/runs/${executionId}/`,
-                latestReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${groupId}/latest/index.html`,
-                prevReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${groupId}/prev/index.html`
-              }
-            };
-
-            await writeStatus(executionId, statusPayload);
-
-            const userData = buildUserData({
-              env,
-              groupId,
-              locale,
-              executionId,
-              reportType,
-              instanceType,
-              retries,
-              workers,
-              timeoutMs,
-              artifactPath,
-              videoMode,
-              screenshotMode,
-              traceMode,
-              specPath,
-              tags
-            });
-
-            const runParams = {
-              ImageId: process.env.RUNNER_AMI,
-              InstanceType: instanceType || process.env.DEFAULT_INSTANCE_TYPE,
-              IamInstanceProfile: { Arn: process.env.RUNNER_INSTANCE_PROFILE },
-              MaxCount: 1,
-              MinCount: 1,
-              SecurityGroupIds: [process.env.RUNNER_SECURITY_GROUP],
-              SubnetId: process.env.RUNNER_SUBNET,
-              InstanceInitiatedShutdownBehavior: 'terminate',
-              TagSpecifications: [
-                {
-                  ResourceType: 'instance',
-                  Tags: [
-                    { Key: 'Name', Value: `${process.env.ProjectName || 'bloomex-qa-runner'}` },
-                    { Key: 'Project', Value: process.env.ProjectName || 'bloomex-qa-automation' },
-                    { Key: 'Env', Value: env },
-                    { Key: 'ExecutionId', Value: executionId },
-                    { Key: 'Group', Value: groupId }
-                  ]
-                }
-              ],
-              UserData: userData
-            };
-
-            await ec2.runInstances(runParams).promise();
-
-            const response = {
-              executionId,
-              statusUrl: `${process.env.VIEWER_BASE_URL}/api/status?executionId=${executionId}`,
-              latestReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${groupId}/latest/index.html`,
-              prevReportUrl: `${process.env.VIEWER_BASE_URL}/reports/${env}/${locale}/${groupId}/prev/index.html`
-            };
-
-            return {
-              statusCode: 200,
-              headers: buildCors(),
-              body: JSON.stringify(response)
-            };
-          };
-
-          function buildError(message) {
-            return {
-              statusCode: 400,
-              headers: buildCors(),
-              body: JSON.stringify({ error: message })
-            };
-          }
-
-          function buildCors() {
-            return {
-              'Access-Control-Allow-Origin': '*',
-              'Access-Control-Allow-Headers': '*',
-              'Access-Control-Allow-Methods': 'OPTIONS,POST'
-            };
-          }
-
-  TriggerFunctionUrl:
-    Type: AWS::Lambda::Url
-    Properties:
-      AuthType: NONE
-      TargetFunctionArn: !Ref TriggerLambda
-      Cors:
-        AllowHeaders: ['*']
-        AllowMethods: [POST, OPTIONS]
-        AllowOrigins: ['*']
-
-  TriggerUrlPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunctionUrl
-      FunctionName: !Ref TriggerLambda
-      Principal: '*'
-      FunctionUrlAuthType: NONE
 
   RunnerInstanceRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
       Policies:
         - PolicyName: RunnerS3Access
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
+                Action: [s3:GetObject, s3:ListBucket]
                 Resource:
-                  - !Sub '${ArtifactBucket.Arn}'
-                  - !Sub '${ArtifactBucket.Arn}/*'
+                  - !Sub "arn:aws:s3:::${ArtifactBucketName}"
+                  - !Sub "arn:aws:s3:::${ArtifactBucketName}/*"
               - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:PutObjectAcl
-                  - s3:ListBucket
+                Action: [s3:PutObject, s3:DeleteObject, s3:GetObject, s3:ListBucket]
                 Resource:
-                  - !Sub '${StagingBucket.Arn}'
-                  - !Sub '${StagingBucket.Arn}/*'
+                  - !Sub "arn:aws:s3:::${ReportsBucketName}"
+                  - !Sub "arn:aws:s3:::${ReportsBucketName}/*"
+        - PolicyName: RunnerSelfTerminate
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ec2:TerminateInstances, ec2:StopInstances, ec2:DescribeInstances]
+                Resource: "*"
+        - PolicyName: RunnerLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: "*"
       Tags:
         - Key: Project
           Value: !Ref ProjectName
-        - Key: Env
+        - Key: Environment
           Value: !Ref EnvironmentName
 
   RunnerInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      Roles: [!Ref RunnerInstanceRole]
-      Path: /
+      Roles:
+        - !Ref RunnerInstanceRole
+
+  TriggerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: TriggerRunInstances
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:RunInstances
+                  - ec2:CreateTags
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeInstances
+                Resource: "*"
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt RunnerInstanceRole.Arn
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: "*"
+
+  TriggerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt TriggerLambdaRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          RUNNER_AMI: !Ref RunnerAmiId
+          RUNNER_PROFILE_ARN: !GetAtt RunnerInstanceProfile.Arn
+          RUNNER_SG: !Ref RunnerSecurityGroup
+          RUNNER_SUBNET: !Select [0, !Ref PublicSubnets]
+          ARTIFACT_BUCKET: !Ref ArtifactBucketName
+          ARTIFACT_KEY: !Ref ArtifactZipKey
+          REPORTS_BUCKET: !Ref ReportsBucketName
+          DEFAULT_INSTANCE_TYPE: !Ref RunnerDefaultInstanceType
+      Code:
+        ZipFile: |
+          import json, os, boto3
+          ec2 = boto3.client("ec2")
+
+          def handler(event, context):
+              body = {}
+              if isinstance(event, dict) and event.get("body"):
+                  try:
+                      body = json.loads(event["body"])
+                  except Exception:
+                      body = {}
+              itype = body.get("instanceType") or os.environ["DEFAULT_INSTANCE_TYPE"]
+
+              user_data = (
+                  "#!/bin/bash\n"
+                  "set -euxo pipefail\n"
+                  "dnf -y update\n"
+                  "dnf -y install awscli unzip\n"
+                  "cd /root\n"
+                  f"aws s3 cp s3://{os.environ['ARTIFACT_BUCKET']}/{os.environ['ARTIFACT_KEY']} /root/artifact.zip\n"
+                  "unzip -o /root/artifact.zip -d /root/qaca\n"
+                  "# TODO: run your runner script here.\n"
+                  "# Example: cd /root/qaca && ./run.sh || true\n"
+                  "# TODO: upload results to reports bucket.\n"
+                  f"# Example: aws s3 sync /root/qaca/allure-report s3://{os.environ['REPORTS_BUCKET']}/reports/latest/ --delete || true\n"
+                  "IID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)\n"
+                  f"aws ec2 terminate-instances --instance-ids $IID --region {os.environ.get('AWS_REGION','')} || shutdown -h now\n"
+              )
+
+              resp = ec2.run_instances(
+                  ImageId=os.environ["RUNNER_AMI"],
+                  InstanceType=itype,
+                  MinCount=1,
+                  MaxCount=1,
+                  IamInstanceProfile={"Arn": os.environ["RUNNER_PROFILE_ARN"]},
+                  NetworkInterfaces=[{
+                      "DeviceIndex": 0,
+                      "SubnetId": os.environ["RUNNER_SUBNET"],
+                      "Groups": [os.environ["RUNNER_SG"]],
+                      "AssociatePublicIpAddress": True
+                  }],
+                  UserData=user_data,
+                  TagSpecifications=[{
+                      "ResourceType": "instance",
+                      "Tags": [{"Key":"Name","Value":"qa-runner"},{"Key":"Project","Value":"qaca"}]
+                  }]
+              )
+              iid = resp["Instances"][0]["InstanceId"]
+              return {
+                  "statusCode": 200,
+                  "headers": {"content-type":"application/json"},
+                  "body": json.dumps({"message":"runner launched","instanceId": iid, "instanceType": itype})
+              }
+
+  TriggerFunctionUrl:
+  Type: AWS::Lambda::Url
+  Properties:
+    AuthType: NONE
+    TargetFunctionArn: !Ref TriggerLambda
+    Cors:
+      AllowOrigins:
+        - "*"
+      AllowMethods:
+        - "POST"
+        - "OPTIONS"
+      AllowHeaders:
+        - "content-type"
+        - "x-qaca-token"
+
+
+  TriggerUrlPermission:
+  Type: AWS::Lambda::Permission
+  Properties:
+    FunctionName: !Ref TriggerLambda
+    Action: lambda:InvokeFunctionUrl
+    Principal: "*"
+    FunctionUrlAuthType: NONE
 
 Outputs:
-  ViewerUrl:
-    Description: Public URL for the report viewer (HTTP). Attach ACM for HTTPS on the ALB.
-    Value: !Sub 'http://${Alb.DNSName}'
-  TriggerFunctionUrlOutput:
-    Description: Function URL to trigger on-demand runs.
+  AlbDnsName:
+    Description: ALB DNS name for report viewer
+    Value: !GetAtt Alb.DNSName
+  TriggerUrl:
+    Description: Function URL to trigger a runner launch
     Value: !GetAtt TriggerFunctionUrl.FunctionUrl
-  ArtifactBucketName:
-    Description: Bucket storing automation artifacts (framework zip, dashboard HTML, scripts).
-    Value: !Ref ArtifactBucket
-  StagingBucketName:
-    Description: Bucket staging run outputs and statuses.
-    Value: !Ref StagingBucket
-  RunnerInstanceProfileArn:
-    Description: Instance profile used by the on-demand runner.
-    Value: !GetAtt RunnerInstanceProfile.Arn
-  ReportsVolumeId:
-    Description: Persistent volume id for report storage.
-    Value: !Ref ViewerVolume
+  ReportsBucketNameOut:
+    Description: Reports bucket used by viewer and runner
+    Value: !Ref ReportsBucketName
+  ArtifactBucketNameOut:
+    Description: Artifact bucket containing automation-artifact.zip
+    Value: !Ref ArtifactBucketName

@@ -1,0 +1,1 @@
+{"statusCode": 200, "headers": {"content-type": "application/json"}, "body": "{\"message\": \"runner launched\", \"instanceId\": \"i-01a46d42de0b15643\", \"instanceType\": \"c7i.2xlarge\"}"}
