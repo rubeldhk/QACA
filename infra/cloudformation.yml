@@ -226,6 +226,9 @@ Resources:
           dnf -y install nginx awscli jq
           systemctl enable nginx
           systemctl start nginx
+	  # Pull QA UI page from artifact bucket
+	  aws s3 cp s3://${ArtifactBucketName}/qaautomation.html /usr/share/nginx/html/qaautomation.html || true
+	  cp -f /usr/share/nginx/html/qaautomation.html /usr/share/nginx/html/index.html || true
 
           mkdir -p /usr/share/nginx/html/reports
           cat >/etc/nginx/conf.d/reports.conf <<'EOF'
@@ -246,6 +249,7 @@ Resources:
 
           # Sync reports from S3 (Allure history / last runs)
           aws s3 sync s3://${ReportsBucketName}/reports/ /usr/share/nginx/html/reports/ --delete || true
+	  */2 * * * * root aws s3 cp s3://${ArtifactBucketName}/qaautomation.html /usr/share/nginx/html/qaautomation.html >/var/log/qaui-sync.log 2>&1
 
           # Cron: refresh every 2 minutes
           cat >/etc/cron.d/reports-sync <<EOF
