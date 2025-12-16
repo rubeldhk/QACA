@@ -377,7 +377,7 @@ Resources:
           QACA_TOKEN: !Ref QacaToken
       Code:
         ZipFile: |
-          import json, os, boto3
+          import json, os, textwrap, boto3
           ec2 = boto3.client("ec2")
 
           def _cors_headers():
@@ -429,33 +429,37 @@ Resources:
               group_id = body.get("groupId") or os.environ.get("GROUP_ID", "QAATG01")
               execution_id = body.get("executionId") or getattr(context, "aws_request_id", "") or "manual"
               reports_prefix = body.get("reportsPrefix") or f"reports/{env_name}/{locale}/{group_id}"
+              reports_bucket = os.environ["REPORTS_BUCKET"]
+              region = os.environ.get("AWS_REGION", "")
 
-              user_data = (
-                  "#!/bin/bash\n"
-                  "set -euxo pipefail\n"
-                  "dnf -y update\n"
-                  "dnf -y install awscli unzip\n"
-                  "cd /root\n"
-                  f"export ARTIFACT_PATH=\"{normalized_artifact}\"\n"
-                  f"export STAGING_BUCKET=\"{staging_bucket}\"\n"
-                  f"export EXECUTION_ID=\"{execution_id}\"\n"
-                  f"export ENV_NAME=\"{env_name}\"\n"
-                  f"export LOCALE=\"{locale}\"\n"
-                  f"export GROUP_ID=\"{group_id}\"\n"
-                  f"export REPORTS_PREFIX=\"{reports_prefix}\"\n"
-                  "ARTIFACT_SOURCE=$ARTIFACT_PATH\n"
-                  "if [[ ! $ARTIFACT_SOURCE =~ ^s3:// ]]; then\n"
-                  "  ARTIFACT_SOURCE=\"s3://${ARTIFACT_SOURCE#s3://}\"\n"
-                  "fi\n"
-                  "aws s3 cp \"$ARTIFACT_SOURCE\" /root/artifact.zip\n"
-                  "unzip -o /root/artifact.zip -d /root/qaca\n"
-                  "# TODO: run your runner script here.\n"
-                  "# Example: cd /root/qaca && ./run.sh || true\n"
-                  "# TODO: upload results to reports bucket.\n"
-                  f"# Example: aws s3 sync /root/qaca/allure-report s3://{os.environ['REPORTS_BUCKET']}/reports/latest/ --delete || true\n"
-                  "IID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)\n"
-                  f"aws ec2 terminate-instances --instance-ids $IID --region {os.environ.get('AWS_REGION','')} || shutdown -h now\n"
-              )
+              user_data = textwrap.dedent(
+                  f"""
+                  #!/bin/bash
+                  set -euxo pipefail
+                  dnf -y update
+                  dnf -y install awscli unzip
+                  cd /root
+                  export ARTIFACT_PATH=\"{normalized_artifact}\"
+                  export STAGING_BUCKET=\"{staging_bucket}\"
+                  export EXECUTION_ID=\"{execution_id}\"
+                  export ENV_NAME=\"{env_name}\"
+                  export LOCALE=\"{locale}\"
+                  export GROUP_ID=\"{group_id}\"
+                  export REPORTS_PREFIX=\"{reports_prefix}\"
+                  ARTIFACT_SOURCE="$ARTIFACT_PATH"
+                  if [[ ! $ARTIFACT_SOURCE =~ ^s3:// ]]; then
+                    ARTIFACT_SOURCE="s3://"${{ARTIFACT_SOURCE#s3://}}
+                  fi
+                  aws s3 cp "$ARTIFACT_SOURCE" /root/artifact.zip
+                  unzip -o /root/artifact.zip -d /root/qaca
+                  # TODO: run your runner script here.
+                  # Example: cd /root/qaca && ./run.sh || true
+                  # TODO: upload results to reports bucket.
+                  # Example: aws s3 sync /root/qaca/allure-report s3://{reports_bucket}/reports/latest/ --delete || true
+                  IID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+                  aws ec2 terminate-instances --instance-ids $IID --region {region} || shutdown -h now
+                  """
+              ).lstrip()
 
               resp = ec2.run_instances(
                   ImageId=os.environ["RUNNER_AMI"],
