@@ -452,7 +452,7 @@ Resources:
       Action: lambda:InvokeFunctionUrl
       FunctionName: !Ref TriggerLambda
       Principal: "*"
-      FunctionUrlAuthType: NONE
+      FunctionUrlAuthType: 'NONE'
 
 Outputs:
   AlbDnsName:
