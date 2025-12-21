@@ -75,7 +75,6 @@ Resources:
         - Key: Environment
           Value: !Ref EnvironmentName
 
-
   ViewerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -89,7 +88,14 @@ Resources:
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
-    
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-viewer-sg"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
   Alb:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -106,8 +112,6 @@ Resources:
           Value: !Ref ProjectName
         - Key: Environment
           Value: !Ref EnvironmentName
-
-
 
   AlbTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -128,7 +132,6 @@ Resources:
         - Key: Environment
           Value: !Ref EnvironmentName
 
-  
   AlbListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -185,6 +188,11 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: "*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
 
   ViewerInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -202,6 +210,13 @@ Resources:
         - !Ref ViewerSecurityGroup
       IamInstanceProfile: !Ref ViewerInstanceProfile
       KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref "AWS::NoValue"]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-viewer"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
@@ -239,7 +254,7 @@ Resources:
           # Cron: refresh every 2 minutes (reports + UI)
           cat >/etc/cron.d/qaca-sync <<EOF
           */2 * * * * root aws s3 sync s3://${ReportsBucketName}/reports/ /usr/share/nginx/html/reports/ --delete >/var/log/reports-sync.log 2>&1
-          */2 * * * * root aws s3 cp s3://${ArtifactBucketName}/qaautomation.html /usr/share/nginx/html/qaautomation.html >/var/log/qaui-sync.log 2>&1
+          */2 * * * * root aws s3 cp s3://${ArtifactBucketName}/qaautomation.html /usr/share/nginx/html/qaautomation.html && cp -f /usr/share/nginx/html/qaautomation.html /usr/share/nginx/html/index.html >/var/log/qaui-sync.log 2>&1
           EOF
 
   RunnerSecurityGroup:
@@ -251,6 +266,13 @@ Resources:
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${EnvironmentName}-runner-sg"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
 
   RunnerInstanceRole:
     Type: AWS::IAM::Role
@@ -291,6 +313,11 @@ Resources:
               - Effect: Allow
                 Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
                 Resource: "*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
 
   RunnerInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -345,94 +372,85 @@ Resources:
           RUNNER_SG: !Ref RunnerSecurityGroup
           SUBNETS: !Join [",", !Ref PublicSubnets]
           RUNNER_TYPE: !Ref RunnerDefaultInstanceType
-        Code:
-          ZipFile: |
-            import json
-            import os
-            import boto3
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
 
-            ec2 = boto3.client("ec2")
+          ec2 = boto3.client("ec2")
 
 
-            def handler(event, ctx):
-                tok = os.environ.get("QACA_TOKEN", "")
-                headers = event.get("headers") or {}
-                if tok and (headers.get("x-qaca-token") or headers.get("X-Qaca-Token") or "") != tok:
-                    return {
-                        "statusCode": 403,
-                        "headers": {"content-type": "application/json"},
-                        "body": json.dumps({"message": "Forbidden"}),
-                    }
+          def handler(event, ctx):
+              tok = os.environ.get("QACA_TOKEN", "")
+              headers = event.get("headers") or {}
+              if tok and (headers.get("x-qaca-token") or headers.get("X-Qaca-Token") or "") != tok:
+                  return {
+                      "statusCode": 403,
+                      "headers": {"content-type": "application/json"},
+                      "body": json.dumps({"message": "Forbidden"}),
+                  }
 
-                body = event.get("body") or "{}"
-                if isinstance(body, str):
-                    try:
-                        payload = json.loads(body)
-                    except Exception:
-                        payload = {}
-                else:
-                    payload = body or {}
+              body = event.get("body") or "{}"
+              if isinstance(body, str):
+                  try:
+                      payload = json.loads(body)
+                  except Exception:
+                      payload = {}
+              else:
+                  payload = body or {}
 
-                artifact = payload.get("artifact_s3_uri") or f"s3://{os.environ['ARTIFACT_BUCKET']}/{os.environ['ARTIFACT_KEY']}"
-                env = payload.get("env", "nonprod")
-                locale = payload.get("locale", "en")
-                group_id = payload.get("groupId", "QAATG01")
-                reports_prefix = payload.get("reportsPrefix") or f"reports/{env}/{locale}/{group_id}"
+              artifact = payload.get("artifact_s3_uri") or f"s3://{os.environ['ARTIFACT_BUCKET']}/{os.environ['ARTIFACT_KEY']}"
+              env = payload.get("env", "nonprod")
+              locale = payload.get("locale", "en")
+              group_id = payload.get("groupId", "QAATG01")
+              reports_prefix = payload.get("reportsPrefix") or f"reports/{env}/{locale}/{group_id}"
 
-                user_data = f"""#!/bin/bash
-            set -eux
-            yum -y install awscli unzip || dnf -y install awscli unzip || true
-            mkdir -p /opt/qaca && cd /opt/qaca
-            aws s3 cp {artifact} a.zip
-            unzip -o a.zip
-            chmod +x run.sh || true
-            REPORTS_BUCKET={os.environ['REPORTS_BUCKET']} REPORTS_PREFIX={reports_prefix} ENV_NAME={env} LOCALE={locale} GROUP_ID={group_id} ./run.sh || true
-            shutdown -h now
-            """
+              user_data = f"""#!/bin/bash
+          set -eux
+          yum -y install awscli unzip || dnf -y install awscli unzip || true
+          mkdir -p /opt/qaca && cd /opt/qaca
+          aws s3 cp {artifact} a.zip
+          unzip -o a.zip
+          chmod +x run.sh || true
+          REPORTS_BUCKET={os.environ['REPORTS_BUCKET']} REPORTS_PREFIX={reports_prefix} ENV_NAME={env} LOCALE={locale} GROUP_ID={group_id} ./run.sh || true
+          shutdown -h now
+          """
 
-                subnets = os.environ["SUBNETS"].split(",")
-                response = ec2.run_instances(
-                    ImageId=os.environ["RUNNER_AMI"],
-                    InstanceType=os.environ.get("RUNNER_TYPE", "c7i.2xlarge"),
-                    MinCount=1,
-                    MaxCount=1,
-                    SubnetId=subnets[0],
-                    SecurityGroupIds=[os.environ["RUNNER_SG"]],
-                    UserData=user_data,
-                    TagSpecifications=[
-                        {
-                            "ResourceType": "instance",
-                            "Tags": [{"Key": "Name", "Value": "qa-runner"}],
-                        }
-                    ],
-                )
-                instance_id = response["Instances"][0]["InstanceId"]
-                return {
-                    "statusCode": 200,
-                    "headers": {"content-type": "application/json"},
-                    "body": json.dumps({"message": "runner launched", "instanceId": instance_id}),
-                }
+              subnets = os.environ["SUBNETS"].split(",")
+              response = ec2.run_instances(
+                  ImageId=os.environ["RUNNER_AMI"],
+                  InstanceType=os.environ.get("RUNNER_TYPE", "c7i.2xlarge"),
+                  MinCount=1,
+                  MaxCount=1,
+                  SubnetId=subnets[0],
+                  SecurityGroupIds=[os.environ["RUNNER_SG"]],
+                  UserData=user_data,
+                  TagSpecifications=[
+                      {
+                          "ResourceType": "instance",
+                          "Tags": [{"Key": "Name", "Value": "qa-runner"}],
+                      }
+                  ],
+              )
+              instance_id = response["Instances"][0]["InstanceId"]
+              return {
+                  "statusCode": 200,
+                  "headers": {"content-type": "application/json"},
+                  "body": json.dumps({"message": "runner launched", "instanceId": instance_id}),
+              }
 
   TriggerFunctionUrl:
     Type: AWS::Lambda::Url
     Properties:
-      AuthType: 'NONE'
-      TargetFunctionArn: !GetAtt TriggerLambda.Arn
-      Cors:
-        AllowOrigins:
-          - "*"
-        AllowMethods:
-          - "POST"
-          - "OPTIONS"
-        AllowHeaders:
-          - "content-type"
-          - "x-qaca-token"
+      TargetFunctionArn: !Ref TriggerLambda
+      AuthType: NONE
 
   TriggerUrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !GetAtt TriggerLambda.Arn
       Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref TriggerLambda
       Principal: "*"
       FunctionUrlAuthType: 'NONE'
 
