@@ -371,7 +371,7 @@ Resources:
   TriggerFunctionUrl:
     Type: AWS::Lambda::Url
     Properties:
-      AuthType: NONE
+      AuthType: 'NONE'
       TargetFunctionArn: !GetAtt TriggerLambda.Arn
       Cors:
         AllowOrigins:
@@ -389,7 +389,7 @@ Resources:
       FunctionName: !GetAtt TriggerLambda.Arn
       Action: lambda:InvokeFunctionUrl
       Principal: "*"
-      FunctionUrlAuthType: NONE
+      FunctionUrlAuthType: 'NONE'
 
 Outputs:
   AlbDnsName:
