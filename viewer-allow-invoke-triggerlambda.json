@@ -1,0 +1,11 @@
+{
+    "Version":  "2012-10-17",
+    "Statement":  [
+                      {
+                          "Effect":  "Allow",
+                          "Sid":  "AllowInvokeTriggerLambda",
+                          "Resource":  "arn:aws:lambda:ca-central-1:853167153405:function:bloomex-qa-automation-main-TriggerLambda-kpVqTkrFUD7M",
+                          "Action":  "lambda:InvokeFunction"
+                      }
+                  ]
+}
