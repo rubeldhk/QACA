@@ -26,31 +26,47 @@ aws cloudformation deploy `
   --stack-name $stackName `
   --template-file infra/cloudformation.yml `
   --capabilities CAPABILITY_NAMED_IAM `
+  --region ca-central-1 `
   --parameter-overrides `
     ProjectName=bloomex-qa-automation `
     EnvironmentName=nonprod `
     VpcId=<vpc-xxxx> `
     PublicSubnets="subnet-aaa,subnet-bbb" `
     KeyPairName="" `
-    ViewerInstanceType=t3.small
+    ViewerInstanceType=t3.small `
+    RunnerMode=start-stopped `
+    RunnerInstanceType=t3.large `
+    RunnerSubnetId=<subnet-ccc> `
+    RunnerSecurityGroupId=<sg-xxx> `
+    RunnerAmiId=<ami-xxx> `
+    RunnerInstanceProfileArn=<arn:aws:iam::<account>:instance-profile/<profile>> `
+    RunnerInstanceRoleArn=<arn:aws:iam::<account>:role/<role>> `
+    RunnerKeyName=""
 ```
 Outputs to capture:
-- `ViewerUrl`
-- `TriggerFunctionUrlOutput`
-- `ArtifactBucketName`
-- `StagingBucketName`
+- `AlbDnsName`
+- `TriggerLambdaName`
+- `TriggerLambdaArn`
+- `RunnerAmiIdOut`
+- `RunnerSubnetIdOut`
+- `RunnerSecurityGroupIdOut`
+- `RunnerInstanceProfileArnOut`
 
-## 4) Point QAautomation.html at the trigger URL
-Update the `data-trigger-url` on the `<body>` tag inside `QAautomation.html` (or set via Nginx sub_filter) to the value from `TriggerFunctionUrlOutput` and re-upload to the artifact bucket.
+## 4) Configure the viewer trigger
+Ensure the viewer's `/opt/qaca-trigger.py` invokes the TriggerLambda by name (see `TriggerLambdaName` output) and passes through the Lambda payload to the UI.
 
-## 5) Smoke test (stage/en)
+## 5) Smoke test (ALB trigger)
 ```powershell
-$trigger = (aws cloudformation describe-stacks --stack-name bloomex-qa-automation --query "Stacks[0].Outputs[?OutputKey=='TriggerFunctionUrlOutput'].OutputValue" --output text)
-Invoke-RestMethod -Method Post -Uri $trigger -Body (@{env='stage';locale='en';groupId='QAATG01';reportType='allure'} | ConvertTo-Json) -ContentType 'application/json'
+$alb = (aws cloudformation describe-stacks --stack-name bloomex-qa-automation --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text)
+Invoke-RestMethod -Method Post -Uri "http://$alb/trigger" -Headers @{ 'x-qaca-token' = '<token>' } -Body (@{env='nonprod';testGroup='QAATG01';locale='en-CA'} | ConvertTo-Json) -ContentType 'application/json'
 ```
-Track status at `https://<ViewerUrl>/api/status?executionId=<id>` and open the generated report links:
-- Latest: `https://<ViewerUrl>/reports/stage/en/QAATG01/latest/index.html`
-- Previous: `https://<ViewerUrl>/reports/stage/en/QAATG01/prev/index.html`
+Use the returned `runnerInstanceId` and `ssmCommandId` for runner/SSM visibility.
+
+```bash
+curl -X POST "http://<ALB_DNS>/trigger" \
+  -H "x-qaca-token: <token>" \
+  -d '{"env":"nonprod","testGroup":"QAATG01","locale":"en-CA"}'
+```
 
 ## 6) HTTPS (ACM + ALB)
 Request/validate an ACM certificate in `ca-central-1`, then add an HTTPS listener + redirect on the ALB targeting the existing target group.
