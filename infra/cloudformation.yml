@@ -395,11 +395,29 @@ Resources:
     Properties:
       ImageId: !Ref RunnerAmiId
       InstanceType: !Ref RunnerInstanceType
-      SubnetId: !If [UseProvidedRunnerSubnet, !Ref RunnerSubnetId, !Select [0, !Ref PublicSubnets]]
+
+      SubnetId: !If
+        - UseProvidedRunnerSubnet
+        - !Ref RunnerSubnetId
+        - !Select [0, !Ref PublicSubnets]
+
       SecurityGroupIds:
-        - !If [UseProvidedRunnerSecurityGroup, !Ref RunnerSecurityGroupId, !Ref RunnerSecurityGroup]
-      IamInstanceProfile: !If [UseProvidedRunnerProfile, !Ref RunnerInstanceProfileArn, !Ref RunnerInstanceProfile]
-      KeyName: !If [HasRunnerKeyPair, !Ref RunnerKeyName, !Ref "AWS::NoValue"]
+        - !If
+        - UseProvidedRunnerSecurityGroup
+        - !Ref RunnerSecurityGroupId
+        - !Ref RunnerSecurityGroup
+
+      # EC2 expects instance-profile NAME (not ARN)
+      IamInstanceProfile: !If
+        - UseProvidedRunnerProfile
+        - !Select [1, !Split ["/", !Ref RunnerInstanceProfileArn]]
+        - !Ref RunnerInstanceProfile
+
+      KeyName: !If
+        - HasRunnerKeyPair
+        - !Ref RunnerKeyName
+        - !Ref AWS::NoValue
+
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-${EnvironmentName}-runner"
@@ -409,6 +427,7 @@ Resources:
           Value: !Ref RunnerTagRole
         - Key: Env
           Value: !Ref EnvironmentName
+
       UserData:
         Fn::Base64: |
           #!/bin/bash
@@ -656,7 +675,6 @@ Resources:
               params = {
                   "ImageId": os.environ["RUNNER_AMI_ID"],
                   "InstanceType": os.environ.get("RUNNER_INSTANCE_TYPE", "t3.large"),
-                  "IamInstanceProfile": {"Arn": os.environ["RUNNER_INSTANCE_PROFILE_ARN"]},
                   "MinCount": 1,
                   "MaxCount": 1,
                   "SubnetId": os.environ["RUNNER_SUBNET_ID"],
