@@ -1,4 +1,4 @@
-﻿AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: '2010-09-09'
 Description: Bloomex QA Automation On-Demand (viewer + ALB + runner trigger). Clean template.
 
 Parameters:
