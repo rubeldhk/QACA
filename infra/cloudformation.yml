@@ -403,9 +403,9 @@ Resources:
 
       SecurityGroupIds:
         - !If
-        - UseProvidedRunnerSecurityGroup
-        - !Ref RunnerSecurityGroupId
-        - !Ref RunnerSecurityGroup
+          - UseProvidedRunnerSecurityGroup
+          - !Ref RunnerSecurityGroupId
+          - !Ref RunnerSecurityGroup
 
       # EC2 expects instance-profile NAME (not ARN)
       IamInstanceProfile: !If
